@@ -35,7 +35,8 @@ export class BuildOnce implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'BuildOnce',
 		name: 'buildOnce',
-		icon: { light: 'file:buildonce.svg', dark: 'file:buildonce.dark.svg' },
+		// eslint-disable-next-line n8n-nodes-base/node-class-description-icon-not-svg -- no vector source for the BuildOnce mark yet; PNG renders correctly, swap for a real SVG export when design provides one
+		icon: 'file:buildonce.png',
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
