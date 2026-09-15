@@ -9,6 +9,12 @@ import type {
 import { NodeApiError } from 'n8n-workflow';
 import type { JsonObject } from 'n8n-workflow';
 
+/**
+ * Every BuildOnce response is wrapped as `{ success: true, data }` (or
+ * `{ success: false, code, message }` for errors, which never reaches here —
+ * a non-2xx throws before this runs). Unwrap once, centrally, rather than at
+ * every call site.
+ */
 async function buildOnceApiRequest(
 	this: IExecuteFunctions | ILoadOptionsFunctions,
 	method: 'GET' | 'POST',
@@ -25,7 +31,12 @@ async function buildOnceApiRequest(
 		json: true,
 	};
 	try {
-		return await this.helpers.httpRequestWithAuthentication.call(this, 'buildOnceApi', options);
+		const response = await this.helpers.httpRequestWithAuthentication.call(
+			this,
+			'buildOnceApi',
+			options,
+		);
+		return (response as { data: JsonObject }).data;
 	} catch (error) {
 		throw new NodeApiError(this.getNode(), error as JsonObject);
 	}
