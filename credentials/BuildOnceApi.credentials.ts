@@ -9,7 +9,7 @@ import {
 export class BuildOnceApi implements ICredentialType {
 	name = 'buildOnceApi';
 	displayName = 'BuildOnce API';
-	icon: Icon = 'file:buildonce.png';
+	icon: Icon = { light: 'file:buildonce.svg', dark: 'file:buildonce.dark.svg' };
 	// eslint-disable-next-line n8n-nodes-base/cred-class-field-documentation-url-miscased -- rule only applies to nodes in n8n's own monorepo; its autofix corrupts a valid URL
 	documentationUrl = 'https://buildonce.app/docs';
 	properties: INodeProperties[] = [
