@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-buildonce",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "n8n community node for BuildOnce — render templates and images from your BuildOnce workspace",
   "homepage": "https://buildonce.app",
   "keywords": [
