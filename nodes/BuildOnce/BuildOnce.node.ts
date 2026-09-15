@@ -131,15 +131,22 @@ export class BuildOnce implements INodeType {
 				displayOptions: { show: { operation: ['renderTemplate'] } },
 				typeOptions: { multipleValues: true },
 				placeholder: 'Add Modification',
-				description:
-					'Variable name → replacement value, applied before rendering. Use "Get Template Parameters" to see the variable names this template accepts.',
+				description: 'Variable name → replacement value, applied before rendering',
 				default: {},
 				options: [
 					{
 						name: 'modification',
 						displayName: 'Modification',
 						values: [
-							{ displayName: 'Variable Name', name: 'name', type: 'string', default: '' },
+							{
+								displayName: 'Variable Name or ID',
+								name: 'name',
+								type: 'options',
+								typeOptions: { loadOptionsMethod: 'getTemplateParameters' },
+								default: '',
+								description:
+									'The template variable to override. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+							},
 							{ displayName: 'Value', name: 'value', type: 'string', default: '' },
 						],
 					},
@@ -260,6 +267,21 @@ export class BuildOnce implements INodeType {
 				const response = await buildOnceApiRequest.call(this, 'GET', '/v1/templates', {}, { limit: 100 });
 				const items = (response.items ?? response) as Array<{ id: string; name: string }>;
 				return items.map((template) => ({ name: template.name, value: template.id }));
+			},
+
+			async getTemplateParameters(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const templateId = this.getCurrentNodeParameter('templateId') as string;
+				if (!templateId) return [];
+				const response = await buildOnceApiRequest.call(
+					this,
+					'GET',
+					`/v1/templates/${templateId}/parameters`,
+				);
+				const parameters = (response.parameters ?? []) as Array<{
+					key: string;
+					label: string | null;
+				}>;
+				return parameters.map((param) => ({ name: param.label ?? param.key, value: param.key }));
 			},
 		},
 	};
