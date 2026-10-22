@@ -63,6 +63,30 @@ Pick a **Resource**, then an **Operation**.
   more), newest first, filterable by source, status, action prefix (e.g. `render.`) and a
   From/To window. Times without a time zone are read as UTC.
 
+## Trigger
+
+**buildonce.app Trigger** starts a workflow when something happens in your workspace:
+
+| Group | Events |
+|---|---|
+| Renders | Render Completed, Render Failed, Render Edited (saved in the embedded editor) |
+| Templates | Template Created, Template Updated, Template Deleted |
+| Social posts | Post Scheduled, Post Published, Post Failed |
+| Credits | Credits Running Low (80%), Credits Used Up (100%) |
+
+Activating the workflow registers a webhook in buildonce.app (it shows up under
+**Settings → Webhooks** as "n8n: *workflow name*"); deactivating it removes the webhook. Each
+delivery is checked against its `BuildOnce-Signature` (HMAC-SHA256 of the exact body, with a
+5-minute timestamp window), so a forged or replayed request never starts the workflow. The
+output is the event as buildonce.app sends it: `type`, `id`, `created_at`, `workspace_id` and
+`data`, plus the `deliveryId`. Turn on **Include Test Events** to also run on "Send test event".
+
+- buildonce.app only delivers to public **HTTPS** URLs, so a self-hosted n8n needs a public
+  address (`N8N_WEBHOOK_URL`); `localhost` won't work.
+- Each active trigger uses one of the workspace's **10** webhook endpoints.
+- If you delete the webhook in buildonce.app while the workflow is active, deactivate and
+  activate the workflow again to re-register it.
+
 ## Development
 
 Built with n8n's [`@n8n/node-cli`](https://www.npmjs.com/package/@n8n/node-cli):

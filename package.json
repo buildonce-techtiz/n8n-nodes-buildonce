@@ -45,7 +45,8 @@
       "dist/credentials/BuildOnceApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/BuildOnce/BuildOnce.node.js"
+      "dist/nodes/BuildOnce/BuildOnce.node.js",
+      "dist/nodes/BuildOnce/BuildOnceTrigger.node.js"
     ]
   },
   "devDependencies": {
