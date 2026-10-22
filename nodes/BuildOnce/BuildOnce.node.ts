@@ -44,14 +44,14 @@ async function buildOnceApiRequest(
 
 export class BuildOnce implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'BuildOnce',
+		displayName: 'buildonce.app',
 		name: 'buildOnce',
 		icon: { light: 'file:buildonce.svg', dark: 'file:buildonce.dark.svg' },
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Render templates and images with BuildOnce',
-		defaults: { name: 'BuildOnce' },
+		description: 'Render your buildonce.app templates to images and PDFs',
+		defaults: { name: 'buildonce.app' },
 		usableAsTool: true,
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node -- our installed eslint-plugin-n8n-nodes-base predates NodeConnectionTypes; n8n's current scan-community-package (@n8n/community-nodes ruleset) requires the enum form, not the 'main' string literal
 		inputs: [NodeConnectionTypes.Main],

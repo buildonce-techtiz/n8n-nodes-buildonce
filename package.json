@@ -1,16 +1,20 @@
 {
   "name": "n8n-nodes-buildonce",
   "version": "0.1.8",
-  "description": "n8n community node for BuildOnce — render templates and images from your BuildOnce workspace",
+  "description": "n8n community node for buildonce.app — render your templates to images and PDFs inside n8n workflows",
   "homepage": "https://buildonce.app",
   "keywords": [
     "n8n-community-node-package",
+    "buildonce",
+    "buildonce.app",
     "image generation",
-    "buildonce"
+    "pdf generation",
+    "templates",
+    "render api"
   ],
   "license": "MIT",
   "author": {
-    "name": "BuildOnce",
+    "name": "buildonce.app",
     "email": "contact@buildonce.app"
   },
   "repository": {
