@@ -103,6 +103,21 @@ function withFileUrl(render: JsonObject): JsonObject {
 	return { ...render, url: files[0]?.url ?? null };
 }
 
+/**
+ * `GET /v1/me` reports credits as `used` and `limit` (the plan's included
+ * credits); add `remaining` so a workflow can check it directly. A negative
+ * limit means unlimited, so there is no number to report.
+ */
+function withRemainingCredits(account: JsonObject): JsonObject {
+	const plan = account.plan as JsonObject | undefined;
+	const credits = plan?.credits as { used?: number; limit?: number } | undefined;
+	if (!plan || !credits || typeof credits.used !== 'number' || typeof credits.limit !== 'number') {
+		return account;
+	}
+	const remaining = credits.limit < 0 ? null : Math.max(credits.limit - credits.used, 0);
+	return { ...account, plan: { ...plan, credits: { ...credits, remaining } } };
+}
+
 /** `GET /v1/renders/:renderId`. */
 async function getRender(this: IExecuteFunctions, renderId: string): Promise<JsonObject> {
 	return withFileUrl(await buildOnceApiRequest.call(this, 'GET', `/v1/renders/${renderId}`));
@@ -211,10 +226,33 @@ export class BuildOnce implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
+					{ name: 'Account', value: 'account' },
 					{ name: 'Render', value: 'render' },
 					{ name: 'Template', value: 'template' },
 				],
 				default: 'template',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['account'] } },
+				options: [
+					{
+						name: 'Get',
+						value: 'getAccount',
+						description: 'Get the workspace, plan and credits this API key is bound to',
+						action: 'Get the account',
+					},
+					{
+						name: 'Get Activity Log',
+						value: 'listActivity',
+						description: 'List the workspace’s activity log, newest first',
+						action: 'Get the activity log',
+					},
+				],
+				default: 'getAccount',
 			},
 			{
 				displayName: 'Operation',
@@ -519,7 +557,7 @@ export class BuildOnce implements INodeType {
 				displayName: 'Return All',
 				name: 'returnAll',
 				type: 'boolean',
-				displayOptions: { show: { operation: ['listTemplates', 'listRenders'] } },
+				displayOptions: { show: { operation: ['listTemplates', 'listRenders', 'listActivity'] } },
 				default: false,
 				description: 'Whether to return all results or only up to a given limit',
 			},
@@ -529,7 +567,10 @@ export class BuildOnce implements INodeType {
 				type: 'number',
 				description: 'Max number of results to return',
 				displayOptions: {
-					show: { operation: ['listTemplates', 'listRenders'], returnAll: [false] },
+					show: {
+						operation: ['listTemplates', 'listRenders', 'listActivity'],
+						returnAll: [false],
+					},
 				},
 				typeOptions: { minValue: 1 },
 				default: 50,
@@ -587,6 +628,69 @@ export class BuildOnce implements INodeType {
 						name: 'templateId',
 						type: 'string',
 						default: '',
+					},
+				],
+			},
+
+			// ---------- Get Activity Log ----------
+			{
+				displayName: 'Filters',
+				name: 'activityFilters',
+				type: 'collection',
+				placeholder: 'Add Filter',
+				displayOptions: { show: { operation: ['listActivity'] } },
+				default: {},
+				options: [
+					{
+						displayName: 'Action',
+						name: 'action',
+						type: 'string',
+						default: '',
+						placeholder: 'render.',
+						description:
+							'Prefix match: `render.` covers every render event, `template.created` just that one',
+					},
+					{
+						displayName: 'From',
+						name: 'from',
+						type: 'dateTime',
+						default: '',
+						description:
+							'Only entries at or after this time. Read as UTC unless it includes a time zone.',
+					},
+					{
+						displayName: 'Source',
+						name: 'source',
+						type: 'options',
+						options: [
+							{ name: 'API', value: 'api' },
+							{ name: 'Dashboard', value: 'dashboard' },
+							{ name: 'MCP', value: 'mcp' },
+							{ name: 'Signed URL', value: 'signed-url' },
+							{ name: 'Staff', value: 'staff' },
+							{ name: 'System', value: 'system' },
+							{ name: 'Webhook', value: 'webhook' },
+						],
+						default: 'api',
+						description: 'Where the activity came from',
+					},
+					{
+						displayName: 'Status',
+						name: 'status',
+						type: 'options',
+						options: [
+							{ name: 'Failure', value: 'failure' },
+							{ name: 'Success', value: 'success' },
+						],
+						default: 'success',
+					},
+					{
+						displayName: 'To',
+						name: 'to',
+						type: 'dateTime',
+						default: '',
+						description:
+							'Only entries at or before this time. Read as UTC unless it includes a time zone.',
 					},
 				],
 			},
@@ -714,6 +818,40 @@ export class BuildOnce implements INodeType {
 						filters,
 						max,
 					);
+					responseData = { items } as unknown as JsonObject;
+				} else if (operation === 'getAccount') {
+					responseData = withRemainingCredits(
+						await buildOnceApiRequest.call(this, 'GET', '/v1/me'),
+					);
+				} else if (operation === 'listActivity') {
+					const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+					const filters = this.getNodeParameter('activityFilters', i) as JsonObject;
+					const qs: JsonObject = {};
+					for (const [key, value] of Object.entries(filters)) {
+						if (value === '' || value === undefined) continue;
+						if (key !== 'from' && key !== 'to') {
+							qs[key] = value;
+							continue;
+						}
+						// n8n's date picker gives a time without a zone. Read that as UTC
+						// rather than the server's own zone, so the window doesn't move
+						// with where n8n runs.
+						const text = String(value);
+						const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(text);
+						const date = new Date(hasZone || !text.includes('T') ? text : `${text}Z`);
+						if (Number.isNaN(date.getTime())) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`"${key}" is not a valid date: ${text}`,
+								{
+									itemIndex: i,
+								},
+							);
+						}
+						qs[key] = date.toISOString();
+					}
+					const max = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
+					const items = await buildOnceApiRequestAllItems.call(this, '/v1/workspace/logs', qs, max);
 					responseData = { items } as unknown as JsonObject;
 				} else {
 					throw new NodeApiError(this.getNode(), {
