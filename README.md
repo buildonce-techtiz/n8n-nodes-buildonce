@@ -28,19 +28,37 @@ pointed at a different environment.
 
 ## Operations
 
-- **List Templates**: list templates in your workspace, with search/sort/folder filters.
-- **Get Template**: fetch a single template's metadata.
-- **Get Template Parameters**: list the variables a template accepts (the keys you can set
-  under *Modifications* on Render Template).
-- **Render Template**: render a template to PNG, JPEG, PDF, or a video (MP4, WebM, GIF)
-  with its animations, optionally overriding variable values, and get back the resulting
-  file's URL. A video takes a few seconds or more to render: by default the node waits for it
-  (up to **Timeout**); turn off **Wait for Completion** to get the render ID straight away.
-  Videos cost 1 credit per started second, at most 60 s.
-- **Get Render**: fetch a render by its ID, with its files and status (`queued`,
-  `processing`, `succeeded` or `failed`). Use it to pick up a video you didn't wait for.
-- **List Renders**: list past renders in the workspace, filterable by format or template.
+Pick a **Resource**, then an **Operation**.
+
+**Template**
+
+- **Render**: render a template to PNG, JPEG, PDF, or a video (MP4, WebM, GIF) with its
+  animations, optionally overriding variable values, and get back the resulting file's URL. A
+  video takes a few seconds or more to render: by default the node waits for it (up to
+  **Timeout**); turn off **Wait for Completion** to get the render ID straight away. Videos
+  cost 1 credit per started second, at most 60 s.
+- **Get**: fetch a single template's metadata.
+- **Get Many**: list templates in your workspace, with search/sort/folder filters.
+- **Get Parameters**: list the variables a template accepts (the keys you can set under
+  *Modifications* on Render).
+
+**Render**
+
+- **Get**: fetch a render by its ID, with its files and status (`queued`, `processing`,
+  `succeeded` or `failed`). Use it to pick up a video you didn't wait for.
+- **Get Many**: list past renders in the workspace, filterable by format or template.
   Useful for polling for new renders.
+
+## Development
+
+Built with n8n's [`@n8n/node-cli`](https://www.npmjs.com/package/@n8n/node-cli):
+`npm run build`, `npm run lint` (n8n's community-node rules, strict mode) and `npm run dev`
+(an n8n with this node, rebuilt on change).
+
+Releases are published from GitHub Actions only: merge a version bump, then push a `v*` tag.
+The Publish workflow runs `npm run release` (lint, build, publish with npm provenance) and then
+checks the published version with n8n's `scan-community-package`. A plain `npm publish` is
+refused on purpose.
 
 ## Example workflow
 
