@@ -48,6 +48,11 @@ Pick a **Resource**, then an **Operation**.
   `succeeded` or `failed`). Use it to pick up a video you didn't wait for.
 - **Get Many**: list past renders in the workspace, filterable by format or template.
   Useful for polling for new renders.
+- **Re-Render**: render an existing render again with new variable values, from that render's
+  own saved design, so any edits made to it are kept. Every page is rendered; keys can target
+  one page (`page2@headline`, or `<pageId>@headline`), and a page key beats a plain one. Keep
+  the original format or pick another, including video (which waits like Template → Render).
+  The result is a new render whose `sourceRenderId` points back at the original.
 
 ## Development
 

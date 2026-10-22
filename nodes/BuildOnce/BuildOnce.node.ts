@@ -2,6 +2,7 @@ import {
 	type IExecuteFunctions,
 	type ILoadOptionsFunctions,
 	type INodeExecutionData,
+	type INodeProperties,
 	type INodePropertyOptions,
 	type INodeType,
 	type INodeTypeDescription,
@@ -92,15 +93,57 @@ const VIDEO_FORMATS = ['mp4', 'webm', 'gif'];
 const POLL_INTERVAL_MS = 3000;
 
 /**
- * `GET /v1/renders/:renderId`, with `url` set to the first file of a finished
- * render so it reads like an image render's response downstream.
+ * A render request (`{ renderId, files, … }`, from Get Render or Re-render)
+ * with `url` set to its first file, so it reads like a template render's
+ * response downstream. One still running has no files and is left as is.
  */
-async function getRender(this: IExecuteFunctions, renderId: string): Promise<JsonObject> {
-	const render = await buildOnceApiRequest.call(this, 'GET', `/v1/renders/${renderId}`);
-	if (render.status !== 'succeeded') return render;
-	const files = (render.files ?? []) as JsonObject[];
+function withFileUrl(render: JsonObject): JsonObject {
+	const files = render.files as JsonObject[] | undefined;
+	if (!Array.isArray(files) || render.url !== undefined) return render;
 	return { ...render, url: files[0]?.url ?? null };
 }
+
+/** `GET /v1/renders/:renderId`. */
+async function getRender(this: IExecuteFunctions, renderId: string): Promise<JsonObject> {
+	return withFileUrl(await buildOnceApiRequest.call(this, 'GET', `/v1/renders/${renderId}`));
+}
+
+/** Video options for Render and Re-render (mp4 / webm / gif; images ignore them). */
+const VIDEO_OPTIONS: INodeProperties[] = [
+	{
+		displayName: 'Frames per Second',
+		name: 'fps',
+		type: 'number',
+		typeOptions: { minValue: 1, maxValue: 60 },
+		default: 30,
+		description: 'Default 30 (GIF: 15, its maximum)',
+	},
+	{
+		displayName: 'Quality',
+		name: 'quality',
+		type: 'options',
+		options: [
+			{ name: 'Small', value: 'small', description: 'Smaller file' },
+			{ name: 'Standard', value: 'standard' },
+			{ name: 'High', value: 'high', description: 'Sharper, larger file' },
+		],
+		default: 'standard',
+		description: 'MP4 and WebM encoder quality. GIF ignores it.',
+	},
+	{
+		displayName: 'Scale',
+		name: 'scale',
+		type: 'options',
+		options: [
+			{ name: 'Half (0.5×)', value: 0.5 },
+			{ name: 'Original (1×)', value: 1 },
+			{ name: 'Double (2×)', value: 2 },
+		],
+		default: 1,
+		description:
+			'Size as a multiple of the design’s. Same price at every size; a GIF is never scaled up.',
+	},
+];
 
 /**
  * Wait for a queued render (a video answers 202 `{ renderId, status }`) by
@@ -226,6 +269,13 @@ export class BuildOnce implements INodeType {
 						description: 'List past renders in the workspace',
 						action: 'Get many renders',
 					},
+					{
+						name: 'Re-Render',
+						value: 'rerender',
+						description:
+							'Render a render again with new values, from its own saved design (keeps hand edits)',
+						action: 'Render a render again with new values',
+					},
 				],
 				default: 'getRender',
 			},
@@ -245,17 +295,110 @@ export class BuildOnce implements INodeType {
 					'The template to use. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 
-			// ---------- Get Render ----------
+			// ---------- Get Render / Re-render ----------
 			{
 				displayName: 'Render ID',
 				name: 'renderId',
 				type: 'string',
-				displayOptions: { show: { operation: ['getRender'] } },
+				displayOptions: { show: { operation: ['getRender', 'rerender'] } },
 				default: '',
 				required: true,
 				placeholder: 'rnd_…',
 				description:
-					'The render to fetch: the `renderId` a render returned (`rnd_…`), or one of its file IDs (`ren_…`)',
+					'The render to use: the `renderId` a render returned (`rnd_…`), or one of its file IDs (`ren_…`)',
+			},
+
+			// ---------- Re-render ----------
+			{
+				displayName: 'Modifications',
+				name: 'rerenderModifications',
+				type: 'fixedCollection',
+				displayOptions: { show: { operation: ['rerender'] } },
+				typeOptions: { multipleValues: true },
+				placeholder: 'Add Modification',
+				description:
+					'Variable name → new value. `page2@headline` changes only the 2nd page, `&lt;pageId&gt;@headline` a page by ID; a page-scoped key beats a plain one.',
+				default: {},
+				options: [
+					{
+						name: 'modification',
+						displayName: 'Modification',
+						values: [
+							{
+								displayName: 'Variable Name',
+								name: 'name',
+								type: 'string',
+								default: '',
+								placeholder: 'headline or page2@headline',
+							},
+							{ displayName: 'Value', name: 'value', type: 'string', default: '' },
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Format',
+				name: 'rerenderFormat',
+				type: 'options',
+				displayOptions: { show: { operation: ['rerender'] } },
+				options: [
+					{ name: 'GIF', value: 'gif' },
+					{ name: 'JPEG', value: 'jpeg' },
+					{ name: 'MP4', value: 'mp4' },
+					{ name: 'PDF', value: 'pdf' },
+					{ name: 'PNG', value: 'png' },
+					{ name: 'Same as Original', value: 'source' },
+					{ name: 'WebM', value: 'webm' },
+				],
+				default: 'source',
+				description:
+					'Every page is rendered. Video formats cost 1 credit per started second, at most 60 s.',
+			},
+			{
+				displayName: 'Wait for Completion',
+				name: 'waitForCompletion',
+				type: 'boolean',
+				displayOptions: { show: { operation: ['rerender'] } },
+				default: true,
+				description:
+					'Whether to wait until a video result is ready and return its file (images are always returned at once). When off, a video returns its render ID straight away; fetch it later with Get.',
+			},
+			{
+				displayName: 'Timeout (Seconds)',
+				name: 'timeout',
+				type: 'number',
+				displayOptions: { show: { operation: ['rerender'], waitForCompletion: [true] } },
+				typeOptions: { minValue: 10 },
+				default: 300,
+				description:
+					'How long to wait for a video before giving up. The render keeps going on buildonce.app either way.',
+			},
+			{
+				displayName: 'Video Options',
+				name: 'videoOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				displayOptions: { show: { operation: ['rerender'] } },
+				default: {},
+				description: 'Used only when the result is a video',
+				options: VIDEO_OPTIONS,
+			},
+			{
+				displayName: 'Additional Fields',
+				name: 'rerenderOptions',
+				type: 'collection',
+				placeholder: 'Add Field',
+				displayOptions: { show: { operation: ['rerender'] } },
+				default: {},
+				options: [
+					{
+						displayName: 'Idempotency Key',
+						name: 'idempotencyKey',
+						type: 'string',
+						default: '',
+						description: 'Lets a retried request avoid a second render and charge',
+					},
+				],
 			},
 
 			// ---------- Render Template ----------
@@ -308,41 +451,7 @@ export class BuildOnce implements INodeType {
 				placeholder: 'Add Option',
 				displayOptions: { show: { operation: ['renderTemplate'], format: VIDEO_FORMATS } },
 				default: {},
-				options: [
-					{
-						displayName: 'Frames per Second',
-						name: 'fps',
-						type: 'number',
-						typeOptions: { minValue: 1, maxValue: 60 },
-						default: 30,
-						description: 'Default 30 (GIF: 15, its maximum)',
-					},
-					{
-						displayName: 'Quality',
-						name: 'quality',
-						type: 'options',
-						options: [
-							{ name: 'Small', value: 'small', description: 'Smaller file' },
-							{ name: 'Standard', value: 'standard' },
-							{ name: 'High', value: 'high', description: 'Sharper, larger file' },
-						],
-						default: 'standard',
-						description: 'MP4 and WebM encoder quality. GIF ignores it.',
-					},
-					{
-						displayName: 'Scale',
-						name: 'scale',
-						type: 'options',
-						options: [
-							{ name: 'Half (0.5×)', value: 0.5 },
-							{ name: 'Original (1×)', value: 1 },
-							{ name: 'Double (2×)', value: 2 },
-						],
-						default: 1,
-						description:
-							'Size as a multiple of the design’s. Same price at every size; a GIF is never scaled up.',
-					},
-				],
+				options: VIDEO_OPTIONS,
 			},
 			{
 				displayName: 'Modifications',
@@ -555,18 +664,29 @@ export class BuildOnce implements INodeType {
 						`/v1/templates/${templateId}/render`,
 						body,
 					);
+				} else if (operation === 'rerender') {
+					const renderId = (this.getNodeParameter('renderId', i) as string).trim();
+					const format = this.getNodeParameter('rerenderFormat', i) as string;
+					const modificationsInput = this.getNodeParameter('rerenderModifications', i) as {
+						modification?: Array<{ name: string; value: string }>;
+					};
+					const options = this.getNodeParameter('rerenderOptions', i, {}) as JsonObject;
 
-					// A video is always queued: the API answers `{ renderId, status }`.
-					const pending = responseData.status === 'queued' || responseData.status === 'processing';
-					if (pending && this.getNodeParameter('waitForCompletion', i, true)) {
-						queuedRenderId = responseData.renderId as string;
-						responseData = await waitForRender.call(
-							this,
-							responseData.renderId as string,
-							this.getNodeParameter('timeout', i, 300) as number,
-							i,
-						);
+					const modifications: Record<string, string> = {};
+					for (const mod of modificationsInput.modification ?? []) {
+						if (mod.name) modifications[mod.name.trim()] = mod.value;
 					}
+
+					const body: JsonObject = { modifications, ...options };
+					if (format !== 'source') body.format = format;
+					// Sent whatever the format: with "Same as Original" only the API knows
+					// whether the result is a video, and an image ignores these.
+					const video = this.getNodeParameter('videoOptions', i, {}) as JsonObject;
+					if (Object.keys(video).length) body.video = video;
+
+					responseData = withFileUrl(
+						await buildOnceApiRequest.call(this, 'POST', `/v1/renders/${renderId}/rerender`, body),
+					);
 				} else if (operation === 'getRender') {
 					const renderId = (this.getNodeParameter('renderId', i) as string).trim();
 					responseData = await getRender.call(this, renderId);
@@ -599,6 +719,20 @@ export class BuildOnce implements INodeType {
 					throw new NodeApiError(this.getNode(), {
 						message: `Unknown operation: ${operation}`,
 					} as JsonObject);
+				}
+
+				// A video (render or re-render) is always queued: the API answers
+				// `{ renderId, status }`. Wait for it unless asked not to.
+				const pending = responseData.status === 'queued' || responseData.status === 'processing';
+				const canWait = operation === 'renderTemplate' || operation === 'rerender';
+				if (canWait && pending && this.getNodeParameter('waitForCompletion', i, true)) {
+					queuedRenderId = responseData.renderId as string;
+					responseData = await waitForRender.call(
+						this,
+						queuedRenderId,
+						this.getNodeParameter('timeout', i, 300) as number,
+						i,
+					);
 				}
 			} catch (error) {
 				if (this.continueOnFail()) {
