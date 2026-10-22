@@ -13,38 +13,7 @@ import {
 	sleep,
 } from 'n8n-workflow';
 
-/**
- * Every BuildOnce response is wrapped as `{ success: true, data }` (or
- * `{ success: false, code, message }` for errors, which never reaches here —
- * a non-2xx throws before this runs). Unwrap once, centrally, rather than at
- * every call site.
- */
-async function buildOnceApiRequest(
-	this: IExecuteFunctions | ILoadOptionsFunctions,
-	method: 'GET' | 'POST',
-	endpoint: string,
-	body: JsonObject = {},
-	qs: JsonObject = {},
-) {
-	const credentials = await this.getCredentials('buildOnceApi');
-	const options = {
-		method,
-		body,
-		qs,
-		url: `${credentials.domain}${endpoint}`,
-		json: true,
-	};
-	try {
-		const response = await this.helpers.httpRequestWithAuthentication.call(
-			this,
-			'buildOnceApi',
-			options,
-		);
-		return (response as { data: JsonObject }).data;
-	} catch (error) {
-		throw new NodeApiError(this.getNode(), error as JsonObject);
-	}
-}
+import { buildOnceApiRequest } from './GenericFunctions';
 
 /** The API caps `limit` at 100 per page. */
 const PAGE_SIZE = 100;
