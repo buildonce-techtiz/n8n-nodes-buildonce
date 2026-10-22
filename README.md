@@ -49,6 +49,21 @@ pointed at a different environment.
 2. Use the returned `url` field to download the rendered image or post it somewhere else in
    your workflow (Slack, email, social, etc).
 
+## What's new
+
+### 0.2.0
+- **Video rendering:** Render Template now renders MP4, WebM and GIF, with video options
+  (frames per second, quality, scale). By default the node waits for the video and returns its
+  file; turn off **Wait for Completion** to get the render ID straight away.
+- **Get Render:** a new operation that fetches a render by ID, with its files and status.
+- **Complete lists:** Return All on List Templates and List Renders now returns every result,
+  not just the first 100, and the template picker lists all templates, sorted by name.
+- **Video formats in the List Renders filter.**
+- **Continue On Fail** works for every operation; a failed or timed-out video also outputs its
+  render ID.
+- **New look:** the buildonce.app name and logo, and working documentation links.
+- Requires Node.js 22 or later when installed outside n8n's own runtime.
+
 ## Compatibility
 
 Works with n8n 1.x and 2.x (last tested on n8n 2.44), with `n8n-workflow` as a peer
