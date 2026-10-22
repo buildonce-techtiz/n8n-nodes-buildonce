@@ -22,7 +22,7 @@
     "url": "git+https://github.com/buildonce-techtiz/n8n-nodes-buildonce.git"
   },
   "engines": {
-    "node": ">=20.15"
+    "node": ">=22"
   },
   "main": "index.js",
   "scripts": {
