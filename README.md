@@ -32,8 +32,13 @@ pointed at a different environment.
 - **Get Template**: fetch a single template's metadata.
 - **Get Template Parameters**: list the variables a template accepts (the keys you can set
   under *Modifications* on Render Template).
-- **Render Template**: render a template to PNG, JPEG or PDF, optionally overriding
-  variable values, and get back the resulting file's URL.
+- **Render Template**: render a template to PNG, JPEG, PDF, or a video (MP4, WebM, GIF)
+  with its animations, optionally overriding variable values, and get back the resulting
+  file's URL. A video takes a few seconds or more to render: by default the node waits for it
+  (up to **Timeout**); turn off **Wait for Completion** to get the render ID straight away.
+  Videos cost 1 credit per started second, at most 60 s.
+- **Get Render**: fetch a render by its ID, with its files and status (`queued`,
+  `processing`, `succeeded` or `failed`). Use it to pick up a video you didn't wait for.
 - **List Renders**: list past renders in the workspace, filterable by format or template.
   Useful for polling for new renders.
 

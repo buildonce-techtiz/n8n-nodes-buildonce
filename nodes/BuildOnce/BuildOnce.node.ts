@@ -6,7 +6,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionTypes } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
 import type { JsonObject } from 'n8n-workflow';
 
 /**
@@ -63,7 +63,13 @@ async function buildOnceApiRequestAllItems(
 	const limit = max === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, max);
 	const results: JsonObject[] = [];
 	for (let page = 1; ; page++) {
-		const response = await buildOnceApiRequest.call(this, 'GET', endpoint, {}, { ...qs, page, limit });
+		const response = await buildOnceApiRequest.call(
+			this,
+			'GET',
+			endpoint,
+			{},
+			{ ...qs, page, limit },
+		);
 		const items = (response.items ?? []) as JsonObject[];
 		results.push(...items);
 		const total = response.total as number | undefined;
@@ -74,6 +80,64 @@ async function buildOnceApiRequestAllItems(
 		) {
 			return max === undefined ? results : results.slice(0, max);
 		}
+	}
+}
+
+const VIDEO_FORMATS = ['mp4', 'webm', 'gif'];
+
+/** How often a queued render is checked while waiting for it. */
+const POLL_INTERVAL_MS = 3000;
+
+/**
+ * `GET /v1/renders/:renderId`, with `url` set to the first file of a finished
+ * render so it reads like an image render's response downstream.
+ */
+async function getRender(this: IExecuteFunctions, renderId: string): Promise<JsonObject> {
+	const render = await buildOnceApiRequest.call(this, 'GET', `/v1/renders/${renderId}`);
+	if (render.status !== 'succeeded') return render;
+	const files = (render.files ?? []) as JsonObject[];
+	return { ...render, url: files[0]?.url ?? null };
+}
+
+/**
+ * Wait for a queued render (a video answers 202 `{ renderId, status }`) by
+ * polling it until it has succeeded or failed.
+ */
+async function waitForRender(
+	this: IExecuteFunctions,
+	renderId: string,
+	timeoutSeconds: number,
+	itemIndex: number,
+): Promise<JsonObject> {
+	const deadline = Date.now() + timeoutSeconds * 1000;
+	for (;;) {
+		const render = await getRender.call(this, renderId);
+		if (render.status === 'succeeded') return render;
+		if (render.status === 'failed') {
+			const error = (render.error ?? {}) as { status?: number; body?: string | JsonObject };
+			const body = error.body;
+			const reason =
+				typeof body === 'object' && body !== null
+					? [body.code, body.message].filter(Boolean).join(': ')
+					: body;
+			throw new NodeOperationError(
+				this.getNode(),
+				`Render ${renderId} failed${reason ? `: ${reason}` : ''}`,
+				{ itemIndex },
+			);
+		}
+		if (Date.now() + POLL_INTERVAL_MS > deadline) {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Render ${renderId} was still ${render.status} after ${timeoutSeconds} s`,
+				{
+					itemIndex,
+					description:
+						'The render keeps going. Fetch it later with the Get Render operation and this render ID, or raise Timeout.',
+				},
+			);
+		}
+		await sleep(POLL_INTERVAL_MS);
 	}
 }
 
@@ -101,6 +165,12 @@ export class BuildOnce implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Get Render',
+						value: 'getRender',
+						description: 'Get a render and its files, or check on one still running',
+						action: 'Get a render',
+					},
+					{
 						name: 'Get Template',
 						value: 'getTemplate',
 						description: 'Get a single template’s metadata',
@@ -127,7 +197,7 @@ export class BuildOnce implements INodeType {
 					{
 						name: 'Render Template',
 						value: 'renderTemplate',
-						description: 'Rasterize a template to an image or PDF',
+						description: 'Render a template to an image, PDF or video',
 						action: 'Render a template',
 					},
 				],
@@ -145,7 +215,21 @@ export class BuildOnce implements INodeType {
 				},
 				default: '',
 				required: true,
-				description: 'The template to use. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+				description:
+					'The template to use. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			},
+
+			// ---------- Get Render ----------
+			{
+				displayName: 'Render ID',
+				name: 'renderId',
+				type: 'string',
+				displayOptions: { show: { operation: ['getRender'] } },
+				default: '',
+				required: true,
+				placeholder: 'rnd_…',
+				description:
+					'The render to fetch: the `renderId` a render returned (`rnd_…`), or one of its file IDs (`ren_…`)',
 			},
 
 			// ---------- Render Template ----------
@@ -155,11 +239,84 @@ export class BuildOnce implements INodeType {
 				type: 'options',
 				displayOptions: { show: { operation: ['renderTemplate'] } },
 				options: [
-					{ name: 'PNG', value: 'png' },
+					{ name: 'GIF', value: 'gif', description: 'Animated GIF of every page' },
 					{ name: 'JPEG', value: 'jpeg' },
+					{ name: 'MP4', value: 'mp4', description: 'Video of every page, with animations' },
 					{ name: 'PDF', value: 'pdf' },
+					{ name: 'PNG', value: 'png' },
+					{ name: 'WebM', value: 'webm', description: 'Video of every page, with animations' },
 				],
 				default: 'png',
+				description:
+					'Video formats (MP4, WebM, GIF) play every page with its animations and cost 1 credit per started second, at most 60 s',
+			},
+			{
+				displayName: 'Wait for Completion',
+				name: 'waitForCompletion',
+				type: 'boolean',
+				displayOptions: { show: { operation: ['renderTemplate'], format: VIDEO_FORMATS } },
+				default: true,
+				description:
+					'Whether to wait until the video is ready and return its file. When off, returns the render ID straight away; fetch the result later with Get Render.',
+			},
+			{
+				displayName: 'Timeout (Seconds)',
+				name: 'timeout',
+				type: 'number',
+				displayOptions: {
+					show: {
+						operation: ['renderTemplate'],
+						format: VIDEO_FORMATS,
+						waitForCompletion: [true],
+					},
+				},
+				typeOptions: { minValue: 10 },
+				default: 300,
+				description:
+					'How long to wait before giving up. The render keeps going on buildonce.app either way.',
+			},
+			{
+				displayName: 'Video Options',
+				name: 'videoOptions',
+				type: 'collection',
+				placeholder: 'Add Option',
+				displayOptions: { show: { operation: ['renderTemplate'], format: VIDEO_FORMATS } },
+				default: {},
+				options: [
+					{
+						displayName: 'Frames per Second',
+						name: 'fps',
+						type: 'number',
+						typeOptions: { minValue: 1, maxValue: 60 },
+						default: 30,
+						description: 'Default 30 (GIF: 15, its maximum)',
+					},
+					{
+						displayName: 'Quality',
+						name: 'quality',
+						type: 'options',
+						options: [
+							{ name: 'Small', value: 'small', description: 'Smaller file' },
+							{ name: 'Standard', value: 'standard' },
+							{ name: 'High', value: 'high', description: 'Sharper, larger file' },
+						],
+						default: 'standard',
+						description: 'MP4 and WebM encoder quality. GIF ignores it.',
+					},
+					{
+						displayName: 'Scale',
+						name: 'scale',
+						type: 'options',
+						options: [
+							{ name: 'Half (0.5×)', value: 0.5 },
+							{ name: 'Original (1×)', value: 1 },
+							{ name: 'Double (2×)', value: 2 },
+						],
+						default: 1,
+						description:
+							'Size as a multiple of the design’s. Same price at every size; a GIF is never scaled up.',
+					},
+				],
 			},
 			{
 				displayName: 'Modifications',
@@ -337,59 +494,94 @@ export class BuildOnce implements INodeType {
 
 		for (let i = 0; i < items.length; i++) {
 			let responseData: JsonObject;
+			// Set once a render is queued, so a failed or timed-out wait still
+			// hands the ID on (with Continue On Fail) for a later Get Render.
+			let queuedRenderId: string | undefined;
 
-			if (operation === 'renderTemplate') {
-				const templateId = this.getNodeParameter('templateId', i) as string;
-				const format = this.getNodeParameter('format', i) as string;
-				const modificationsInput = this.getNodeParameter('modifications', i) as {
-					modification?: Array<{ name: string; value: string }>;
-				};
-				const additionalFields = this.getNodeParameter('additionalFields', i) as {
-					pageId?: string;
-					allPages?: boolean;
-					idempotencyKey?: string;
-				};
+			try {
+				if (operation === 'renderTemplate') {
+					const templateId = this.getNodeParameter('templateId', i) as string;
+					const format = this.getNodeParameter('format', i) as string;
+					const modificationsInput = this.getNodeParameter('modifications', i) as {
+						modification?: Array<{ name: string; value: string }>;
+					};
+					const additionalFields = this.getNodeParameter('additionalFields', i) as {
+						pageId?: string;
+						allPages?: boolean;
+						idempotencyKey?: string;
+					};
 
-				const modifications: Record<string, string> = {};
-				for (const mod of modificationsInput.modification ?? []) {
-					if (mod.name) modifications[mod.name] = mod.value;
+					const modifications: Record<string, string> = {};
+					for (const mod of modificationsInput.modification ?? []) {
+						if (mod.name) modifications[mod.name] = mod.value;
+					}
+
+					const body: JsonObject = { format, modifications, ...additionalFields };
+					const isVideo = VIDEO_FORMATS.includes(format);
+					if (isVideo) {
+						const video = this.getNodeParameter('videoOptions', i, {}) as JsonObject;
+						if (Object.keys(video).length) body.video = video;
+					}
+
+					responseData = await buildOnceApiRequest.call(
+						this,
+						'POST',
+						`/v1/templates/${templateId}/render`,
+						body,
+					);
+
+					// A video is always queued: the API answers `{ renderId, status }`.
+					const pending = responseData.status === 'queued' || responseData.status === 'processing';
+					if (pending && this.getNodeParameter('waitForCompletion', i, true)) {
+						queuedRenderId = responseData.renderId as string;
+						responseData = await waitForRender.call(
+							this,
+							responseData.renderId as string,
+							this.getNodeParameter('timeout', i, 300) as number,
+							i,
+						);
+					}
+				} else if (operation === 'getRender') {
+					const renderId = (this.getNodeParameter('renderId', i) as string).trim();
+					responseData = await getRender.call(this, renderId);
+				} else if (operation === 'getTemplate') {
+					const templateId = this.getNodeParameter('templateId', i) as string;
+					responseData = await buildOnceApiRequest.call(this, 'GET', `/v1/templates/${templateId}`);
+				} else if (operation === 'getTemplateParameters') {
+					const templateId = this.getNodeParameter('templateId', i) as string;
+					responseData = await buildOnceApiRequest.call(
+						this,
+						'GET',
+						`/v1/templates/${templateId}/parameters`,
+					);
+				} else if (operation === 'listTemplates' || operation === 'listRenders') {
+					const isTemplates = operation === 'listTemplates';
+					const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+					const filters = this.getNodeParameter(
+						isTemplates ? 'templateFilters' : 'renderFilters',
+						i,
+					) as JsonObject;
+					const max = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
+					const items = await buildOnceApiRequestAllItems.call(
+						this,
+						isTemplates ? '/v1/templates' : '/v1/renders',
+						filters,
+						max,
+					);
+					responseData = { items } as unknown as JsonObject;
+				} else {
+					throw new NodeApiError(this.getNode(), {
+						message: `Unknown operation: ${operation}`,
+					} as JsonObject);
 				}
-
-				responseData = await buildOnceApiRequest.call(
-					this,
-					'POST',
-					`/v1/templates/${templateId}/render`,
-					{ format, modifications, ...additionalFields },
-				);
-			} else if (operation === 'getTemplate') {
-				const templateId = this.getNodeParameter('templateId', i) as string;
-				responseData = await buildOnceApiRequest.call(this, 'GET', `/v1/templates/${templateId}`);
-			} else if (operation === 'getTemplateParameters') {
-				const templateId = this.getNodeParameter('templateId', i) as string;
-				responseData = await buildOnceApiRequest.call(
-					this,
-					'GET',
-					`/v1/templates/${templateId}/parameters`,
-				);
-			} else if (operation === 'listTemplates' || operation === 'listRenders') {
-				const isTemplates = operation === 'listTemplates';
-				const returnAll = this.getNodeParameter('returnAll', i) as boolean;
-				const filters = this.getNodeParameter(
-					isTemplates ? 'templateFilters' : 'renderFilters',
-					i,
-				) as JsonObject;
-				const max = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
-				const items = await buildOnceApiRequestAllItems.call(
-					this,
-					isTemplates ? '/v1/templates' : '/v1/renders',
-					filters,
-					max,
-				);
-				responseData = { items } as unknown as JsonObject;
-			} else {
-				throw new NodeApiError(this.getNode(), {
-					message: `Unknown operation: ${operation}`,
-				} as JsonObject);
+			} catch (error) {
+				if (this.continueOnFail()) {
+					const json: JsonObject = { error: (error as Error).message };
+					if (queuedRenderId) json.renderId = queuedRenderId;
+					returnData.push({ json, pairedItem: { item: i } });
+					continue;
+				}
+				throw error;
 			}
 
 			const items_ = (responseData.items ?? responseData) as JsonObject | JsonObject[];
