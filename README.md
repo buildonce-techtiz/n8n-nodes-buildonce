@@ -107,6 +107,19 @@ refused on purpose.
 
 ## What's new
 
+### 0.3.0
+- **buildonce.app Trigger:** a new trigger node that starts a workflow on 11 events (renders,
+  templates, social posts and credits), registers its own webhook when the workflow is
+  activated, and checks the signature of every delivery. See [Trigger](#trigger).
+- **Resources:** operations are grouped under **Template**, **Render** and **Account**. Pick a
+  resource, then an operation.
+- **Render → Re-Render:** render an existing render again with new values, keeping its edits;
+  page-specific keys like `page2@headline` change one page only.
+- **Account → Get:** workspace, plan and credits, including `remaining`.
+- **Account → Get Activity Log:** the workspace's activity log, filterable by source, status,
+  action and date range.
+- Built and linted with n8n's own `@n8n/node-cli`, and released through its publish flow.
+
 ### 0.2.0
 - **Video rendering:** Render Template now renders MP4, WebM and GIF, with video options
   (frames per second, quality, scale). By default the node waits for the video and returns its

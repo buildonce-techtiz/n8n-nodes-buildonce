@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-buildonce",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "n8n community node for buildonce.app — render your templates to images and PDFs inside n8n workflows",
   "homepage": "https://buildonce.app",
   "keywords": [
