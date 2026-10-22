@@ -581,7 +581,13 @@ export class BuildOnce implements INodeType {
 					returnData.push({ json, pairedItem: { item: i } });
 					continue;
 				}
-				throw error;
+				// n8n's own errors carry the HTTP context its UI shows, so they pass
+				// through; anything else is wrapped and tied to the failing item.
+				const nodeError =
+					error instanceof NodeApiError || error instanceof NodeOperationError
+						? error
+						: new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });
+				throw nodeError;
 			}
 
 			const items_ = (responseData.items ?? responseData) as JsonObject | JsonObject[];
