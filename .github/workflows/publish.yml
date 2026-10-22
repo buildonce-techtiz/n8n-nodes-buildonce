@@ -24,10 +24,21 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run lint
+      # `n8n-node release` in CI: lint, build, then `npm publish` with a
+      # provenance statement (n8n requires provenance for verified nodes).
+      - name: Release
+        run: npm run release
 
-      - run: npm run build
-
-      - run: npx @n8n/scan-community-package .
-
-      - run: npm publish --provenance --access public
+      # n8n's scanner always fetches the package from npm and the source at
+      # its provenance commit, so it can only check the version once it is
+      # published. It exits 0 even when the scan fails, hence the grep.
+      - name: Scan the published version with n8n's scanner
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          for i in $(seq 1 30); do
+            npm view "n8n-nodes-buildonce@$VERSION" version >/dev/null 2>&1 && break
+            sleep 10
+          done
+          out=$(npx -y @n8n/scan-community-package@0.38.0 "n8n-nodes-buildonce@$VERSION")
+          echo "$out"
+          echo "$out" | grep -q "has passed all security checks"

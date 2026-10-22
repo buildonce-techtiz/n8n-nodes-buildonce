@@ -1,13 +1,16 @@
-import type {
-	IExecuteFunctions,
-	ILoadOptionsFunctions,
-	INodeExecutionData,
-	INodePropertyOptions,
-	INodeType,
-	INodeTypeDescription,
+import {
+	type IExecuteFunctions,
+	type ILoadOptionsFunctions,
+	type INodeExecutionData,
+	type INodePropertyOptions,
+	type INodeType,
+	type INodeTypeDescription,
+	type JsonObject,
+	NodeApiError,
+	NodeConnectionTypes,
+	NodeOperationError,
+	sleep,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
-import type { JsonObject } from 'n8n-workflow';
 
 /**
  * Every BuildOnce response is wrapped as `{ success: true, data }` (or
@@ -148,60 +151,83 @@ export class BuildOnce implements INodeType {
 		icon: { light: 'file:buildonce.svg', dark: 'file:buildonce.dark.svg' },
 		group: ['transform'],
 		version: 1,
-		subtitle: '={{$parameter["operation"]}}',
-		description: 'Render your buildonce.app templates to images and PDFs',
+		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
+		description: 'Render your buildonce.app templates to images, PDFs and videos',
 		defaults: { name: 'buildonce.app' },
 		usableAsTool: true,
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node -- our installed eslint-plugin-n8n-nodes-base predates NodeConnectionTypes; n8n's current scan-community-package (@n8n/community-nodes ruleset) requires the enum form, not the 'main' string literal
 		inputs: [NodeConnectionTypes.Main],
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong -- see inputs above
 		outputs: [NodeConnectionTypes.Main],
 		credentials: [{ name: 'buildOnceApi', required: true }],
 		properties: [
+			// Operation values are unique across resources, so `execute` and every
+			// field's displayOptions key on `operation` alone; `resource` only
+			// groups them in the UI.
+			{
+				displayName: 'Resource',
+				name: 'resource',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{ name: 'Render', value: 'render' },
+					{ name: 'Template', value: 'template' },
+				],
+				default: 'template',
+			},
 			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
 				noDataExpression: true,
+				displayOptions: { show: { resource: ['template'] } },
 				options: [
 					{
-						name: 'Get Render',
-						value: 'getRender',
-						description: 'Get a render and its files, or check on one still running',
-						action: 'Get a render',
-					},
-					{
-						name: 'Get Template',
+						name: 'Get',
 						value: 'getTemplate',
 						description: 'Get a single template’s metadata',
 						action: 'Get a template',
 					},
 					{
-						name: 'Get Template Parameters',
+						name: 'Get Many',
+						value: 'listTemplates',
+						description: 'List templates in the workspace',
+						action: 'Get many templates',
+					},
+					{
+						name: 'Get Parameters',
 						value: 'getTemplateParameters',
 						description: 'Get the variables a template accepts',
 						action: 'Get template parameters',
 					},
 					{
-						name: 'List Renders',
-						value: 'listRenders',
-						description: 'List past renders in the workspace',
-						action: 'List renders',
-					},
-					{
-						name: 'List Templates',
-						value: 'listTemplates',
-						description: 'List templates in the workspace',
-						action: 'List templates',
-					},
-					{
-						name: 'Render Template',
+						name: 'Render',
 						value: 'renderTemplate',
 						description: 'Render a template to an image, PDF or video',
 						action: 'Render a template',
 					},
 				],
 				default: 'renderTemplate',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['render'] } },
+				options: [
+					{
+						name: 'Get',
+						value: 'getRender',
+						description: 'Get a render and its files, or check on one still running',
+						action: 'Get a render',
+					},
+					{
+						name: 'Get Many',
+						value: 'listRenders',
+						description: 'List past renders in the workspace',
+						action: 'Get many renders',
+					},
+				],
+				default: 'getRender',
 			},
 
 			// ---------- shared: template picker ----------
