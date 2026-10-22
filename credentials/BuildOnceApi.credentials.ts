@@ -8,10 +8,10 @@ import {
 
 export class BuildOnceApi implements ICredentialType {
 	name = 'buildOnceApi';
-	displayName = 'BuildOnce API';
+	displayName = 'buildonce.app API';
 	icon: Icon = { light: 'file:buildonce.svg', dark: 'file:buildonce.dark.svg' };
 	// eslint-disable-next-line n8n-nodes-base/cred-class-field-documentation-url-miscased -- rule only applies to nodes in n8n's own monorepo; its autofix corrupts a valid URL
-	documentationUrl = 'https://buildonce.app/docs';
+	documentationUrl = 'https://buildonce.app/documentation/api-keys-scopes';
 	properties: INodeProperties[] = [
 		{
 			displayName: 'API Key',
@@ -21,7 +21,8 @@ export class BuildOnceApi implements ICredentialType {
 			typeOptions: {
 				password: true,
 			},
-			description: 'Workspace API key from BuildOnce (Workspace → Settings → API Keys). Starts with "fl_live_".',
+			description:
+				'Workspace API key from buildonce.app (Settings → API Keys). Starts with "fl_live_" or "fl_test_".',
 		},
 		{
 			displayName: 'Domain',
