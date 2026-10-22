@@ -42,6 +42,41 @@ async function buildOnceApiRequest(
 	}
 }
 
+/** The API caps `limit` at 100 per page. */
+const PAGE_SIZE = 100;
+
+/**
+ * Fetch a paginated list (`{ items, total, page, limit }`) page by page, so
+ * results past the first 100 aren't silently dropped. Stops at `max` items
+ * when given, otherwise at the last page.
+ *
+ * The page size stays the same on every request: the API offsets by
+ * `(page - 1) * limit`, so shrinking `limit` for a last partial page would
+ * re-read items already returned. Overshoot is trimmed instead.
+ */
+async function buildOnceApiRequestAllItems(
+	this: IExecuteFunctions | ILoadOptionsFunctions,
+	endpoint: string,
+	qs: JsonObject = {},
+	max?: number,
+): Promise<JsonObject[]> {
+	const limit = max === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, max);
+	const results: JsonObject[] = [];
+	for (let page = 1; ; page++) {
+		const response = await buildOnceApiRequest.call(this, 'GET', endpoint, {}, { ...qs, page, limit });
+		const items = (response.items ?? []) as JsonObject[];
+		results.push(...items);
+		const total = response.total as number | undefined;
+		if (
+			items.length < limit ||
+			(max !== undefined && results.length >= max) ||
+			(total !== undefined && results.length >= total)
+		) {
+			return max === undefined ? results : results.slice(0, max);
+		}
+	}
+}
+
 export class BuildOnce implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'buildonce.app',
@@ -246,9 +281,12 @@ export class BuildOnce implements INodeType {
 						name: 'format',
 						type: 'options',
 						options: [
-							{ name: 'PNG', value: 'png' },
+							{ name: 'GIF', value: 'gif' },
 							{ name: 'JPEG', value: 'jpeg' },
+							{ name: 'MP4', value: 'mp4' },
 							{ name: 'PDF', value: 'pdf' },
+							{ name: 'PNG', value: 'png' },
+							{ name: 'WebM', value: 'webm' },
 						],
 						default: 'png',
 					},
@@ -266,9 +304,13 @@ export class BuildOnce implements INodeType {
 	methods = {
 		loadOptions: {
 			async getTemplates(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const response = await buildOnceApiRequest.call(this, 'GET', '/v1/templates', {}, { limit: 100 });
-				const items = (response.items ?? response) as Array<{ id: string; name: string }>;
-				return items.map((template) => ({ name: template.name, value: template.id }));
+				const items = await buildOnceApiRequestAllItems.call(this, '/v1/templates', {
+					sort: 'name',
+				});
+				return items.map((template) => ({
+					name: template.name as string,
+					value: template.id as string,
+				}));
 			},
 
 			async getTemplateParameters(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
@@ -329,20 +371,21 @@ export class BuildOnce implements INodeType {
 					'GET',
 					`/v1/templates/${templateId}/parameters`,
 				);
-			} else if (operation === 'listTemplates') {
+			} else if (operation === 'listTemplates' || operation === 'listRenders') {
+				const isTemplates = operation === 'listTemplates';
 				const returnAll = this.getNodeParameter('returnAll', i) as boolean;
-				const filters = this.getNodeParameter('templateFilters', i) as JsonObject;
-				const qs: JsonObject = { ...filters };
-				if (!returnAll) qs.limit = this.getNodeParameter('limit', i) as number;
-				else qs.limit = 100;
-				responseData = await buildOnceApiRequest.call(this, 'GET', '/v1/templates', {}, qs);
-			} else if (operation === 'listRenders') {
-				const returnAll = this.getNodeParameter('returnAll', i) as boolean;
-				const filters = this.getNodeParameter('renderFilters', i) as JsonObject;
-				const qs: JsonObject = { ...filters };
-				if (!returnAll) qs.limit = this.getNodeParameter('limit', i) as number;
-				else qs.limit = 100;
-				responseData = await buildOnceApiRequest.call(this, 'GET', '/v1/renders', {}, qs);
+				const filters = this.getNodeParameter(
+					isTemplates ? 'templateFilters' : 'renderFilters',
+					i,
+				) as JsonObject;
+				const max = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
+				const items = await buildOnceApiRequestAllItems.call(
+					this,
+					isTemplates ? '/v1/templates' : '/v1/renders',
+					filters,
+					max,
+				);
+				responseData = { items } as unknown as JsonObject;
 			} else {
 				throw new NodeApiError(this.getNode(), {
 					message: `Unknown operation: ${operation}`,
