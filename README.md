@@ -54,6 +54,15 @@ Pick a **Resource**, then an **Operation**.
   the original format or pick another, including video (which waits like Template → Render).
   The result is a new render whose `sourceRenderId` points back at the original.
 
+**Account**
+
+- **Get**: the workspace, plan and credits this API key is bound to. Credits come as `used`,
+  `limit` and `remaining` (`null` on an unlimited plan), so a workflow can check them before
+  rendering.
+- **Get Activity Log**: the workspace's activity log (renders, template changes, key events and
+  more), newest first, filterable by source, status, action prefix (e.g. `render.`) and a
+  From/To window. Times without a time zone are read as UTC.
+
 ## Development
 
 Built with n8n's [`@n8n/node-cli`](https://www.npmjs.com/package/@n8n/node-cli):
