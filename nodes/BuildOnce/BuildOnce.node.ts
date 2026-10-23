@@ -3,6 +3,7 @@ import {
 	type ILoadOptionsFunctions,
 	type INodeExecutionData,
 	type INodeProperties,
+	type INodePropertyCollection,
 	type INodePropertyOptions,
 	type INodeType,
 	type INodeTypeDescription,
@@ -90,6 +91,344 @@ function withRemainingCredits(account: JsonObject): JsonObject {
 /** `GET /v1/renders/:renderId`. */
 async function getRender(this: IExecuteFunctions, renderId: string): Promise<JsonObject> {
 	return withFileUrl(await buildOnceApiRequest.call(this, 'GET', `/v1/renders/${renderId}`));
+}
+
+/**
+ * Allowed values for per-render animation (`animation` on Template → Render),
+ * as validated by the API (the editor's timeline vocabulary). Anything else
+ * is a 400 INVALID_ANIMATION listing the allowed values.
+ */
+const toOptions = (values: Array<[string, string]>) =>
+	values.map(([name, value]) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name));
+const MOTION_KINDS = toOptions([
+	['Blur', 'blur'],
+	['Fade', 'fade'],
+	['Flip X', 'flip-x'],
+	['Flip Y', 'flip-y'],
+	['None', 'none'],
+	['Rotate', 'rotate'],
+	['Scale', 'scale'],
+	['Scale Down', 'scale-down'],
+	['Scale Up', 'scale-up'],
+	['Slide Down', 'slide-down'],
+	['Slide Left', 'slide-left'],
+	['Slide Right', 'slide-right'],
+	['Slide Up', 'slide-up'],
+	['Zoom', 'zoom'],
+]);
+
+/** What `buildAnimation` reads from the Animation field. */
+interface AnimationInput {
+	pages?: Array<{
+		page?: string;
+		duration?: number;
+		transition?: string;
+		transitionDuration?: number;
+	}>;
+	layers?: Array<{ layer?: string; settings?: JsonObject }>;
+	raw?: Array<{ json?: string | JsonObject }>;
+}
+
+const ANIMATION_OPTIONS: INodePropertyCollection[] = [
+	{
+		name: 'pages',
+		displayName: 'Page Timing',
+		values: [
+			{
+				displayName: 'Page',
+				name: 'page',
+				type: 'string',
+				default: 'page1',
+				placeholder: 'page1',
+				description: '`page1`, `page2`, … or a page ID',
+			},
+			{
+				displayName: 'Duration (Seconds)',
+				name: 'duration',
+				type: 'number',
+				typeOptions: { minValue: 0, maxValue: 60, numberPrecision: 2 },
+				default: 0,
+				description: 'How long the page shows, 0.5–60 s. 0 keeps the template’s timing.',
+			},
+			{
+				displayName: 'Transition',
+				name: 'transition',
+				type: 'options',
+				options: [
+					{ name: 'Fade', value: 'fade' },
+					{ name: 'Keep Template’s', value: 'keep' },
+					{ name: 'None', value: 'none' },
+					{ name: 'Slide Left', value: 'slide-left' },
+					{ name: 'Slide Right', value: 'slide-right' },
+					{ name: 'Wipe', value: 'wipe' },
+					{ name: 'Zoom', value: 'zoom' },
+				],
+				default: 'keep',
+				description: 'The transition into the next page',
+			},
+			{
+				displayName: 'Transition Duration (Seconds)',
+				name: 'transitionDuration',
+				type: 'number',
+				typeOptions: { minValue: 0, maxValue: 3, numberPrecision: 2 },
+				default: 0,
+				description: 'Up to 3 s. 0 uses the default length.',
+			},
+		],
+	},
+	{
+		name: 'layers',
+		displayName: 'Layer Animation',
+		values: [
+			{
+				displayName: 'Layer',
+				name: 'layer',
+				type: 'string',
+				default: '',
+				placeholder: 'headline',
+				description: 'A variable name or layer ID. `page2@headline` changes it on one page only.',
+			},
+			{
+				displayName: 'Settings',
+				name: 'settings',
+				type: 'collection',
+				placeholder: 'Add Setting',
+				default: {},
+				options: [
+					{
+						displayName: 'Ambient Direction',
+						name: 'ambientDirection',
+						type: 'options',
+						options: toOptions([
+							['Down', 'down'],
+							['In', 'in'],
+							['Left', 'left'],
+							['Out', 'out'],
+							['Right', 'right'],
+							['Up', 'up'],
+						]),
+						default: 'in',
+						description: 'Which way Ken Burns moves',
+					},
+					{
+						displayName: 'Ambient Motion',
+						name: 'ambientAnim',
+						type: 'options',
+						options: toOptions([
+							['Blink', 'blink'],
+							['Bounce', 'bounce'],
+							['Breathe', 'breathe'],
+							['Drift', 'drift'],
+							['Float', 'float'],
+							['Ken Burns', 'ken-burns'],
+							['None', 'none'],
+							['Pulse', 'pulse'],
+							['Shake', 'shake'],
+							['Slow Rotate', 'slow-rotate'],
+							['Wiggle', 'wiggle'],
+						]),
+						default: 'none',
+						description: 'Movement that runs the whole time the layer is on screen',
+					},
+					{
+						displayName: 'Ambient Speed',
+						name: 'ambientSpeed',
+						type: 'number',
+						typeOptions: { minValue: 0.25, maxValue: 4, numberPrecision: 2 },
+						default: 1,
+					},
+					{
+						displayName: 'Ambient Strength',
+						name: 'ambientStrength',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 3, numberPrecision: 2 },
+						default: 1,
+					},
+					{
+						displayName: 'Animation Duration (Seconds)',
+						name: 'animDuration',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 10, numberPrecision: 2 },
+						default: 0.5,
+						description: 'How long the enter and exit animations take',
+					},
+					{
+						displayName: 'Easing',
+						name: 'animEasing',
+						type: 'options',
+						options: toOptions([
+							['Back', 'back'],
+							['Ease In', 'ease-in'],
+							['Ease In Out', 'ease-in-out'],
+							['Ease Out', 'ease-out'],
+							['Elastic', 'elastic'],
+							['Linear', 'linear'],
+						]),
+						default: 'ease-out',
+					},
+					{
+						displayName: 'Enter Animation',
+						name: 'enterAnim',
+						type: 'options',
+						options: MOTION_KINDS,
+						default: 'fade',
+					},
+					{
+						displayName: 'Exit Animation',
+						name: 'exitAnim',
+						type: 'options',
+						options: MOTION_KINDS,
+						default: 'fade',
+					},
+					{
+						displayName: 'Hide At (Seconds)',
+						name: 'hideAt',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 60, numberPrecision: 2 },
+						default: 0,
+						description: 'When the layer leaves, from the start of its page',
+					},
+					{
+						displayName: 'Highlight At (Seconds)',
+						name: 'highlightAt',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 60, numberPrecision: 2 },
+						default: 0,
+					},
+					{
+						displayName: 'Highlight Duration (Seconds)',
+						name: 'highlightDuration',
+						type: 'number',
+						typeOptions: { minValue: 0.1, maxValue: 60, numberPrecision: 2 },
+						default: 1,
+					},
+					{
+						displayName: 'Pop At (Seconds)',
+						name: 'popAt',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 60, numberPrecision: 2 },
+						default: 0,
+					},
+					{
+						displayName: 'Reverse Animation',
+						name: 'animReverse',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to play the enter animation in reverse',
+					},
+					{
+						displayName: 'Show At (Seconds)',
+						name: 'showAt',
+						type: 'number',
+						typeOptions: { minValue: 0, maxValue: 60, numberPrecision: 2 },
+						default: 0,
+						description: 'When the layer appears, from the start of its page',
+					},
+					{
+						displayName: 'Text Animation',
+						name: 'textAnim',
+						type: 'options',
+						options: toOptions([
+							['Letters', 'letters'],
+							['Lines', 'lines'],
+							['None', 'none'],
+							['Typewriter', 'typewriter'],
+							['Words', 'words'],
+						]),
+						default: 'none',
+					},
+					{
+						displayName: 'Text Animation Duration (Seconds)',
+						name: 'textAnimDuration',
+						type: 'number',
+						typeOptions: { minValue: 0.2, maxValue: 20, numberPrecision: 2 },
+						default: 1,
+					},
+				],
+			},
+		],
+	},
+	{
+		name: 'raw',
+		displayName: 'Raw JSON',
+		values: [
+			{
+				displayName: 'Animation (JSON)',
+				name: 'json',
+				type: 'json',
+				default: '{\n  "pages": {},\n  "layers": {}\n}',
+				description:
+					'Any other allowed value, e.g. `"hideAt": null` or `"duration": null` (automatic). The fields above win where both set the same key.',
+			},
+		],
+	},
+];
+
+/**
+ * Turns the Animation field into the API's `animation: { pages, layers }`.
+ * Raw JSON goes in first and the form's fields override it key by key;
+ * nothing is sent when nothing was set.
+ */
+function buildAnimation(
+	this: IExecuteFunctions,
+	input: AnimationInput,
+	itemIndex: number,
+): JsonObject | undefined {
+	const pages: Record<string, JsonObject> = {};
+	const layers: Record<string, JsonObject> = {};
+
+	for (const { json } of input.raw ?? []) {
+		let parsed: unknown = json;
+		if (typeof json === 'string') {
+			try {
+				parsed = JSON.parse(json);
+			} catch {
+				throw new NodeOperationError(this.getNode(), 'Animation (JSON) is not valid JSON', {
+					itemIndex,
+				});
+			}
+		}
+		const raw = (parsed ?? {}) as {
+			pages?: Record<string, JsonObject>;
+			layers?: Record<string, JsonObject>;
+		};
+		for (const [key, value] of Object.entries(raw.pages ?? {}))
+			pages[key] = { ...pages[key], ...value };
+		for (const [key, value] of Object.entries(raw.layers ?? {}))
+			layers[key] = { ...layers[key], ...value };
+	}
+
+	for (const entry of input.pages ?? []) {
+		const key = (entry.page ?? '').trim();
+		if (!key) continue;
+		const page: JsonObject = {};
+		if (entry.duration) page.duration = entry.duration;
+		if (entry.transition === 'none') page.transition = null;
+		else if (entry.transition && entry.transition !== 'keep') {
+			page.transition = {
+				kind: entry.transition,
+				...(entry.transitionDuration ? { duration: entry.transitionDuration } : {}),
+			};
+		} else if (entry.transitionDuration) {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Page "${key}": a transition duration needs a transition`,
+				{ itemIndex },
+			);
+		}
+		if (Object.keys(page).length) pages[key] = { ...pages[key], ...page };
+	}
+
+	for (const entry of input.layers ?? []) {
+		const key = (entry.layer ?? '').trim();
+		if (!key || !entry.settings || !Object.keys(entry.settings).length) continue;
+		layers[key] = { ...layers[key], ...entry.settings };
+	}
+
+	const animation: JsonObject = {};
+	if (Object.keys(pages).length) animation.pages = pages;
+	if (Object.keys(layers).length) animation.layers = layers;
+	return Object.keys(animation).length ? animation : undefined;
 }
 
 /** Video options for Render and Re-render (mp4 / webm / gif; images ignore them). */
@@ -461,6 +800,18 @@ export class BuildOnce implements INodeType {
 				options: VIDEO_OPTIONS,
 			},
 			{
+				displayName: 'Animation',
+				name: 'animation',
+				type: 'fixedCollection',
+				placeholder: 'Add Animation Change',
+				displayOptions: { show: { operation: ['renderTemplate'], format: VIDEO_FORMATS } },
+				typeOptions: { multipleValues: true },
+				description:
+					'Change timing and animation for this render only, so one template gives different cuts. The template itself is never changed.',
+				default: {},
+				options: ANIMATION_OPTIONS,
+			},
+			{
 				displayName: 'Modifications',
 				name: 'modifications',
 				type: 'fixedCollection',
@@ -729,6 +1080,12 @@ export class BuildOnce implements INodeType {
 					if (isVideo) {
 						const video = this.getNodeParameter('videoOptions', i, {}) as JsonObject;
 						if (Object.keys(video).length) body.video = video;
+						const animation = buildAnimation.call(
+							this,
+							this.getNodeParameter('animation', i, {}) as AnimationInput,
+							i,
+						);
+						if (animation) body.animation = animation;
 					}
 
 					responseData = await buildOnceApiRequest.call(

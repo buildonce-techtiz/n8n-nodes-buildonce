@@ -37,6 +37,17 @@ Pick a **Resource**, then an **Operation**.
   video takes a few seconds or more to render: by default the node waits for it (up to
   **Timeout**); turn off **Wait for Completion** to get the render ID straight away. Videos
   cost 1 credit per started second, at most 60 s.
+  For a video, **Animation** changes timing and animation for that render only, so one template
+  gives different cuts (the template itself is never changed):
+  - **Page Timing**: a page (`page1`, `page2`, … or its ID), how long it shows (0.5–60 s) and
+    the transition into the next page (fade, slide left/right, wipe, zoom, or none).
+  - **Layer Animation**: a layer (variable name or layer ID, `page2@headline` for one page)
+    and its enter/exit animation, show/hide times, easing, ambient motion, text animation and
+    more.
+  - **Raw JSON**: any other allowed value, such as `"hideAt": null`; the fields above win
+    where both set the same key.
+
+  An invalid value fails the node with buildonce.app's message listing the allowed values.
 - **Get**: fetch a single template's metadata.
 - **Get Many**: list templates in your workspace, with search/sort/folder filters.
 - **Get Parameters**: list the variables a template accepts (the keys you can set under
@@ -132,6 +143,13 @@ refused on purpose.
   render ID.
 - **New look:** the buildonce.app name and logo, and working documentation links.
 - Requires Node.js 22 or later when installed outside n8n's own runtime.
+
+### Different cuts from one template
+
+To get a 6-second and a 12-second video of a 4-page template, add two **Template → Render**
+nodes with format **MP4** and, under **Animation → Page Timing**, set `page1` to `page4` to
+**1.5 s** in one and **3 s** in the other (transition **None** for exact lengths). Each video
+costs 1 credit per started second.
 
 ## Compatibility
 
