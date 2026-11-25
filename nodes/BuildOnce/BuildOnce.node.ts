@@ -512,6 +512,14 @@ async function waitForRender(
 
 /** A listing video takes minutes (#942): poll it far less often than a render. */
 const LISTING_VIDEO_POLL_MS = 15000;
+/** Status checks in a row that may fail on the network before the wait gives up. */
+const MAX_MISSED_POLLS = 3;
+
+/** No HTTP answer at all (a dropped connection), a 429 or a 5xx. */
+function isTransient(error: unknown): boolean {
+	const code = Number((error as { httpCode?: string | number }).httpCode);
+	return !code || code === 429 || code >= 500;
+}
 
 /**
  * Wait for a listing video by polling it until it is ready or failed. Ready
@@ -525,8 +533,24 @@ async function waitForListingVideo(
 	itemIndex: number,
 ): Promise<JsonObject> {
 	const deadline = Date.now() + timeoutSeconds * 1000;
+	let missedPolls = 0;
 	for (;;) {
-		const video = await buildOnceApiRequest.call(this, 'GET', `/v1/listing-videos/${videoId}`);
+		let video: JsonObject;
+		try {
+			video = await buildOnceApiRequest.call(this, 'GET', `/v1/listing-videos/${videoId}`);
+			missedPolls = 0;
+		} catch (error) {
+			// A wait lasts minutes, so one dropped connection or a passing 5xx
+			// (seen live: a poll that hung up mid-wait) must not lose a video
+			// that is still being made. A 4xx is a real answer and is thrown.
+			if (!isTransient(error) || ++missedPolls > MAX_MISSED_POLLS) {
+				throw error instanceof NodeApiError
+					? error
+					: new NodeApiError(this.getNode(), error as JsonObject);
+			}
+			await sleep(LISTING_VIDEO_POLL_MS);
+			continue;
+		}
 		if (video.status === 'ready') return video;
 		if (video.status === 'failed') {
 			throw new NodeOperationError(
