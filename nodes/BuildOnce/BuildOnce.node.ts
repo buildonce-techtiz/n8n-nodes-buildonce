@@ -510,6 +510,52 @@ async function waitForRender(
 	}
 }
 
+/** A listing video takes minutes (#942): poll it far less often than a render. */
+const LISTING_VIDEO_POLL_MS = 15000;
+
+/**
+ * Wait for a listing video by polling it until it is ready or failed. Ready
+ * means at least one of its three files was made; each output carries its own
+ * status and URL.
+ */
+async function waitForListingVideo(
+	this: IExecuteFunctions,
+	videoId: string,
+	timeoutSeconds: number,
+	itemIndex: number,
+): Promise<JsonObject> {
+	const deadline = Date.now() + timeoutSeconds * 1000;
+	for (;;) {
+		const video = await buildOnceApiRequest.call(this, 'GET', `/v1/listing-videos/${videoId}`);
+		if (video.status === 'ready') return video;
+		if (video.status === 'failed') {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Listing video ${videoId} failed${video.error ? `: ${String(video.error)}` : ''}`,
+				{ itemIndex },
+			);
+		}
+		if (Date.now() + LISTING_VIDEO_POLL_MS > deadline) {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Listing video ${videoId} was still ${String(video.status)} after ${timeoutSeconds} s`,
+				{
+					itemIndex,
+					description:
+						'The video keeps going. Fetch it later with Get Video and this video ID, or raise Timeout.',
+				},
+			);
+		}
+		await sleep(LISTING_VIDEO_POLL_MS);
+	}
+}
+
+/** Photo URLs typed one per line or comma-separated, or an expression giving an array. */
+function photoUrlList(value: unknown): string[] {
+	const parts = Array.isArray(value) ? value.map(String) : String(value ?? '').split(/[\n,]/);
+	return parts.map((url) => url.trim()).filter(Boolean);
+}
+
 export class BuildOnce implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'buildonce.app',
@@ -535,6 +581,7 @@ export class BuildOnce implements INodeType {
 				noDataExpression: true,
 				options: [
 					{ name: 'Account', value: 'account' },
+					{ name: 'Listing Video', value: 'listingVideo' },
 					{ name: 'Render', value: 'render' },
 					{ name: 'Template', value: 'template' },
 				],
@@ -624,6 +671,237 @@ export class BuildOnce implements INodeType {
 					},
 				],
 				default: 'getRender',
+			},
+
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['listingVideo'] } },
+				options: [
+					{
+						name: 'Create Listing',
+						value: 'createListing',
+						description:
+							'Save a real estate listing from its details and photo URLs, or from the agent’s listing page',
+						action: 'Create a listing',
+					},
+					{
+						name: 'Create Video',
+						value: 'createListingVideo',
+						description: 'Make a listing video: vertical, wide and an unbranded MLS copy',
+						action: 'Create a listing video',
+					},
+					{
+						name: 'Estimate Video',
+						value: 'estimateListingVideo',
+						description: 'Price a listing video in credits without making it',
+						action: 'Estimate a listing video',
+					},
+					{
+						name: 'Get Video',
+						value: 'getListingVideo',
+						description: 'Get a listing video’s status and its three files',
+						action: 'Get a listing video',
+					},
+				],
+				default: 'createListing',
+			},
+			{
+				displayName: 'Source',
+				name: 'listingSource',
+				type: 'options',
+				displayOptions: { show: { operation: ['createListing'] } },
+				options: [
+					{ name: 'Details and Photo URLs', value: 'details' },
+					{ name: 'Listing Page Link', value: 'link' },
+				],
+				default: 'details',
+			},
+			{
+				displayName: 'Listing Page Link',
+				name: 'listingLink',
+				type: 'string',
+				displayOptions: { show: { operation: ['createListing'], listingSource: ['link'] } },
+				default: '',
+				required: true,
+				placeholder: 'https://www.youragency.com/listings/42-maple-street',
+				description:
+					'The agent’s own listing page (their website, brokerage or IDX page). Zillow and Realtor.com are refused.',
+			},
+			{
+				displayName: 'Photo URLs',
+				name: 'photoUrls',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				displayOptions: { show: { operation: ['createListing'], listingSource: ['details'] } },
+				default: '',
+				description:
+					'Public photo links in video order, one per line or comma-separated (up to 60). The first one opens the video.',
+			},
+			{
+				displayName: 'Listing Details',
+				name: 'listingDetails',
+				type: 'collection',
+				placeholder: 'Add Detail',
+				displayOptions: { show: { operation: ['createListing'], listingSource: ['details'] } },
+				default: {},
+				options: [
+					{ displayName: 'Address', name: 'address', type: 'string', default: '' },
+					{
+						displayName: 'Area',
+						name: 'area',
+						type: 'number',
+						default: 0,
+						description: 'Living area, in the area unit',
+					},
+					{
+						displayName: 'Area Unit',
+						name: 'areaUnit',
+						type: 'options',
+						options: [
+							{ name: 'Square Feet', value: 'sqft' },
+							{ name: 'Square Metres', value: 'sqm' },
+						],
+						default: 'sqft',
+					},
+					{ displayName: 'Baths', name: 'baths', type: 'number', default: 0 },
+					{ displayName: 'Beds', name: 'beds', type: 'number', default: 0 },
+					{
+						displayName: 'Currency',
+						name: 'currency',
+						type: 'string',
+						default: 'USD',
+						description: 'ISO 4217 code, e.g. USD',
+					},
+					{
+						displayName: 'Description',
+						name: 'description',
+						type: 'string',
+						typeOptions: { rows: 4 },
+						default: '',
+					},
+					{
+						displayName: 'Features',
+						name: 'features',
+						type: 'string',
+						default: '',
+						description: 'Short highlights, comma-separated, e.g. Pool, Two-car garage',
+					},
+					{ displayName: 'Headline', name: 'headline', type: 'string', default: '' },
+					{ displayName: 'Price', name: 'price', type: 'number', default: 0 },
+					{ displayName: 'Year Built', name: 'yearBuilt', type: 'number', default: 2000 },
+				],
+			},
+			{
+				displayName: 'Listing ID',
+				name: 'listingId',
+				type: 'string',
+				displayOptions: { show: { operation: ['createListingVideo', 'estimateListingVideo'] } },
+				default: '',
+				required: true,
+				placeholder: 'lst_…',
+				description: 'The listing to make the video from (the ID Create Listing returns)',
+			},
+			{
+				displayName: 'Style',
+				name: 'listingVideoStyle',
+				type: 'options',
+				displayOptions: { show: { operation: ['createListingVideo', 'estimateListingVideo'] } },
+				options: [
+					{ name: 'Clean', value: 'clean' },
+					{ name: 'Luxury', value: 'luxury' },
+					{ name: 'Modern', value: 'modern' },
+				],
+				default: 'modern',
+			},
+			{
+				displayName: 'Voiceover',
+				name: 'listingVideoVoice',
+				type: 'boolean',
+				displayOptions: { show: { operation: ['createListingVideo', 'estimateListingVideo'] } },
+				default: true,
+				description: 'Whether to add a spoken voiceover written from the listing',
+			},
+			{
+				displayName: 'Captions',
+				name: 'listingVideoCaptions',
+				type: 'boolean',
+				displayOptions: { show: { operation: ['createListingVideo', 'estimateListingVideo'] } },
+				default: true,
+				description: 'Whether to show word-by-word captions of the voiceover',
+			},
+			{
+				displayName: 'AI Scenes',
+				name: 'listingVideoAiScenes',
+				type: 'number',
+				displayOptions: { show: { operation: ['createListingVideo', 'estimateListingVideo'] } },
+				typeOptions: { minValue: 0, maxValue: 6 },
+				default: 0,
+				description:
+					'How many photos, from the first, get an AI camera move (costs AI credits; a failed one is refunded)',
+			},
+			{
+				displayName: 'Additional Fields',
+				name: 'listingVideoOptions',
+				type: 'collection',
+				placeholder: 'Add Field',
+				displayOptions: { show: { operation: ['createListingVideo', 'estimateListingVideo'] } },
+				default: {},
+				options: [
+					{
+						displayName: 'Music Track ID',
+						name: 'musicTrackId',
+						type: 'string',
+						default: '',
+						placeholder: 'mtr_…',
+						description: 'A track from the buildonce.app music library; no music when empty',
+					},
+					{
+						displayName: 'Status Label',
+						name: 'statusLabel',
+						type: 'string',
+						default: '',
+						placeholder: 'Just Listed',
+						description: 'A chip on the opening, e.g. Just Listed or Open House',
+					},
+					{
+						displayName: 'Voice ID',
+						name: 'voiceId',
+						type: 'string',
+						default: '',
+						description: 'A specific voice; the default voice when empty',
+					},
+				],
+			},
+			{
+				displayName: 'Wait for Completion',
+				name: 'listingVideoWait',
+				type: 'boolean',
+				displayOptions: { show: { operation: ['createListingVideo'] } },
+				default: true,
+				description:
+					'Whether to wait until the video is ready and return its files. When off, returns the video ID straight away; fetch it later with Get Video.',
+			},
+			{
+				displayName: 'Timeout (Seconds)',
+				name: 'listingVideoTimeout',
+				type: 'number',
+				displayOptions: { show: { operation: ['createListingVideo'], listingVideoWait: [true] } },
+				typeOptions: { minValue: 60 },
+				default: 900,
+				description:
+					'How long to wait before giving up. The video keeps going on buildonce.app either way.',
+			},
+			{
+				displayName: 'Video ID',
+				name: 'listingVideoId',
+				type: 'string',
+				displayOptions: { show: { operation: ['getListingVideo'] } },
+				default: '',
+				required: true,
+				placeholder: 'lvd_…',
 			},
 
 			// ---------- shared: template picker ----------
@@ -1179,6 +1457,63 @@ export class BuildOnce implements INodeType {
 					const max = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
 					const items = await buildOnceApiRequestAllItems.call(this, '/v1/workspace/logs', qs, max);
 					responseData = { items } as unknown as JsonObject;
+				} else if (operation === 'createListing') {
+					const source = this.getNodeParameter('listingSource', i) as string;
+					let body: JsonObject;
+					if (source === 'link') {
+						body = { link: (this.getNodeParameter('listingLink', i) as string).trim() };
+					} else {
+						const details = this.getNodeParameter('listingDetails', i, {}) as JsonObject;
+						body = {};
+						for (const [key, value] of Object.entries(details)) {
+							if (value === '' || value === undefined || value === null) continue;
+							body[key] =
+								key === 'features'
+									? String(value)
+											.split(',')
+											.map((f) => f.trim())
+											.filter(Boolean)
+									: value;
+						}
+						const photoUrls = photoUrlList(this.getNodeParameter('photoUrls', i, ''));
+						if (photoUrls.length) body.photoUrls = photoUrls;
+					}
+					responseData = await buildOnceApiRequest.call(this, 'POST', '/v1/listings', body);
+				} else if (operation === 'createListingVideo' || operation === 'estimateListingVideo') {
+					const options = this.getNodeParameter('listingVideoOptions', i, {}) as JsonObject;
+					const body: JsonObject = {
+						listingId: (this.getNodeParameter('listingId', i) as string).trim(),
+						style: this.getNodeParameter('listingVideoStyle', i) as string,
+						voice: this.getNodeParameter('listingVideoVoice', i) as boolean,
+						captions: this.getNodeParameter('listingVideoCaptions', i) as boolean,
+						aiScenes: this.getNodeParameter('listingVideoAiScenes', i) as number,
+					};
+					for (const [key, value] of Object.entries(options)) {
+						if (typeof value === 'string' && value.trim()) body[key] = value.trim();
+					}
+					const isEstimate = operation === 'estimateListingVideo';
+					responseData = await buildOnceApiRequest.call(
+						this,
+						'POST',
+						isEstimate ? '/v1/listing-videos/estimate' : '/v1/listing-videos',
+						body,
+					);
+					if (!isEstimate && this.getNodeParameter('listingVideoWait', i, true)) {
+						queuedRenderId = responseData.id as string;
+						responseData = await waitForListingVideo.call(
+							this,
+							queuedRenderId,
+							this.getNodeParameter('listingVideoTimeout', i, 900) as number,
+							i,
+						);
+					}
+				} else if (operation === 'getListingVideo') {
+					const videoId = (this.getNodeParameter('listingVideoId', i) as string).trim();
+					responseData = await buildOnceApiRequest.call(
+						this,
+						'GET',
+						`/v1/listing-videos/${videoId}`,
+					);
 				} else {
 					throw new NodeApiError(this.getNode(), {
 						message: `Unknown operation: ${operation}`,
@@ -1201,7 +1536,10 @@ export class BuildOnce implements INodeType {
 			} catch (error) {
 				if (this.continueOnFail()) {
 					const json: JsonObject = { error: (error as Error).message };
-					if (queuedRenderId) json.renderId = queuedRenderId;
+					if (queuedRenderId) {
+						// A listing video's id is lvd_…; a render's is rnd_….
+						json[queuedRenderId.startsWith('lvd_') ? 'videoId' : 'renderId'] = queuedRenderId;
+					}
 					returnData.push({ json, pairedItem: { item: i } });
 					continue;
 				}

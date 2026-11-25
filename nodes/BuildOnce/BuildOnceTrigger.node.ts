@@ -106,6 +106,8 @@ export class BuildOnceTrigger implements INodeType {
 						value: 'credits.exhausted',
 						description: '100% of the plan’s credits used',
 					},
+					{ name: 'Listing Video Failed', value: 'listing_video.failed' },
+					{ name: 'Listing Video Ready', value: 'listing_video.completed' },
 					{ name: 'Post Failed', value: 'post.failed' },
 					{ name: 'Post Published', value: 'post.published' },
 					{ name: 'Post Scheduled', value: 'post.scheduled' },
