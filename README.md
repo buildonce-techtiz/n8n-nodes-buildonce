@@ -65,6 +65,24 @@ Pick a **Resource**, then an **Operation**.
   the original format or pick another, including video (which waits like Template → Render).
   The result is a new render whose `sourceRenderId` points back at the original.
 
+**Listing Video**
+
+Real estate listing videos: one listing gives three files, a vertical (9:16) and a wide
+(16:9) branded video plus an unbranded wide copy for the MLS.
+
+- **Create Listing**: save a listing from its details (address, beds, baths, area, price,
+  description) and photo URLs in video order, or from the agent's own listing page (Zillow
+  and Realtor.com links are refused). Photos are copied into the media library; any that
+  can't be fetched are counted in `skippedPhotos`.
+- **Estimate Video**: price a video in render and AI credits before making it, with the same
+  options as Create Video.
+- **Create Video**: make the video, with a style (modern, luxury or clean), voiceover,
+  captions, up to 6 AI scenes, a status label and music. By default the node waits until it
+  is ready (up to **Timeout**, 15 minutes) and returns the three file links; a status check
+  that drops is retried. Turn off **Wait for Completion** to get the video ID straight away.
+- **Get Video**: a listing video's status (`queued`, `making`, `ready` or `failed`) and
+  its files.
+
 **Account**
 
 - **Get**: the workspace, plan and credits this API key is bound to. Credits come as `used`,
@@ -84,6 +102,7 @@ Pick a **Resource**, then an **Operation**.
 | Templates | Template Created, Template Updated, Template Deleted |
 | Social posts | Post Scheduled, Post Published, Post Failed |
 | Credits | Credits Running Low (80%), Credits Used Up (100%) |
+| Listing videos | Listing Video Ready, Listing Video Failed |
 
 Activating the workflow registers a webhook in buildonce.app (it shows up under
 **Settings → Webhooks** as "n8n: *workflow name*"); deactivating it removes the webhook. Each
@@ -117,6 +136,15 @@ refused on purpose.
    your workflow (Slack, email, social, etc).
 
 ## What's new
+
+### 0.4.0
+- **Listing Video:** a new resource for real estate listing videos. Create a listing from its
+  details and photos or the agent's listing page, estimate the price, make the video (waiting
+  for the vertical, wide and MLS files by default) and get its status. See
+  [Operations](#operations).
+- **Trigger:** starts on **Listing Video Ready** and **Listing Video Failed**.
+- **Template → Render → Animation:** change page timing and layer animation for one video
+  render without editing the template.
 
 ### 0.3.0
 - **buildonce.app Trigger:** a new trigger node that starts a workflow on 11 events (renders,
